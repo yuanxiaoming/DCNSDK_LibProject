@@ -79,17 +79,18 @@
         <item name="android:textColor">@color/dcn_ucenter_navi_text_selector</item>
         <item name="android:clickable">true</item>
     </style>
+
     <style name="dcn_dialog_ucenter" parent="@android:style/Theme.Dialog">
         <item name="android:windowNoTitle">true</item>
     </style>
-
+    <!--
     <declare-styleable name="line">
         <attr name="orientation" format="string" />
-    </declare-styleable>
-
-
-    <style name="dialogWindowAnim" parent="android:Animation" mce_bogus="1" >
+    </declare-styleable>
+    -->
+    <style name="dialogWindowAnim" mce_bogus="1" parent="android:Animation">
         <item name="android:windowEnterAnimation">@anim/dcn_from_right</item>
         <item name="android:windowExitAnimation">@anim/dcn_to_left</item>
     </style>
+
 </resources>
