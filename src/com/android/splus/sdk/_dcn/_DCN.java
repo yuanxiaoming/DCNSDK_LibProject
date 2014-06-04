@@ -1,20 +1,39 @@
 package com.android.splus.sdk._dcn;
 
+import com.android.splus.sdk.apiinterface.APIConstants;
+import com.android.splus.sdk.apiinterface.DateUtil;
 import com.android.splus.sdk.apiinterface.IPayManager;
 import com.android.splus.sdk.apiinterface.InitBean;
 import com.android.splus.sdk.apiinterface.InitBean.InitBeanSuccess;
 import com.android.splus.sdk.apiinterface.InitCallBack;
 import com.android.splus.sdk.apiinterface.LoginCallBack;
+import com.android.splus.sdk.apiinterface.LoginParser;
 import com.android.splus.sdk.apiinterface.LogoutCallBack;
+import com.android.splus.sdk.apiinterface.MD5Util;
+import com.android.splus.sdk.apiinterface.NetHttpUtil;
+import com.android.splus.sdk.apiinterface.NetHttpUtil.DataCallback;
 import com.android.splus.sdk.apiinterface.RechargeCallBack;
+import com.android.splus.sdk.apiinterface.RequestModel;
 import com.android.splus.sdk.apiinterface.UserAccount;
 import com.downjoy.Downjoy;
 import com.downjoy.DownjoyError;
 import com.downjoy.util.Util;
 
-import android.app.Activity;
-import android.os.Bundle;
+import org.json.JSONObject;
 
+import android.app.Activity;
+import android.app.AlertDialog;
+import android.app.ProgressDialog;
+import android.content.DialogInterface;
+import android.os.Bundle;
+import android.text.InputFilter;
+import android.text.InputType;
+import android.text.TextUtils;
+import android.util.Log;
+import android.widget.EditText;
+import android.widget.Toast;
+
+import java.util.HashMap;
 import java.util.Properties;
 
 public class _DCN implements IPayManager{
@@ -52,11 +71,17 @@ public class _DCN implements IPayManager{
 
     private int mUid = 0;
 
-    private String mPassport = "";
+    private String mPassport;
 
-    private String mSessionid = "";
+    private String mSessionid;
+
+    private float mMoney ;
+
+    private String mPayway="_DCN" ;
 
     private Downjoy mDownjoyinstance;
+
+    private ProgressDialog mProgressDialog;
 
 
     /**
@@ -123,6 +148,8 @@ public class _DCN implements IPayManager{
 
     com.downjoy.CallbackListener mLoginCallbackListener=new com.downjoy.CallbackListener(){
 
+        private static final long serialVersionUID = 1L;
+
         @Override
         public void onLoginSuccess(Bundle bundle) {
             String memberId = bundle
@@ -133,11 +160,32 @@ public class _DCN implements IPayManager{
                             .getString(Downjoy.DJ_PREFIX_STR + "nickname");
             String token = bundle.getString(Downjoy.DJ_PREFIX_STR
                             + "token");
+            Log.d(TAG, "mid:" + memberId + "\nusername:"+ username + "\nnickname:" + nickname+ "\ntoken:" + token);
+            HashMap<String, Object> params = new HashMap<String, Object>();
+            Integer gameid = mInitBean.getGameid();
+            String partner = mInitBean.getPartner();
+            String referer = mInitBean.getReferer();
+            long unixTime = DateUtil.getUnixTime();
+            String deviceno=mInitBean.getDeviceNo();
+            String signStr =deviceno+gameid+partner+referer+unixTime+mInitBean.getAppKey();
+            String sign=MD5Util.getMd5toLowerCase(signStr);
 
-            Util.alert(mActivity, "mid:" + memberId + "\nusername:"
-                            + username + "\nnickname:" + nickname
-                            + "\ntoken:" + token);
-            mLoginCallBack.loginSuccess(null);
+            params.put("deviceno", deviceno);
+            params.put("gameid", gameid);
+            params.put("partner",partner);
+            params.put("referer", referer);
+            params.put("time", unixTime);
+            params.put("sign", sign);
+            params.put("partner_sessionid", "");
+            params.put("partner_uid",  memberId);
+            params.put("partner_token", token);
+            params.put("partner_nickname", nickname);
+            params.put("partner_username", username);
+            params.put("partner_appid", mAppId);
+            String hashMapTOgetParams = NetHttpUtil.hashMapTOgetParams(params, APIConstants.LOGIN_URL);
+            System.out.println(hashMapTOgetParams);
+            showProgressDialog(mActivity);
+            NetHttpUtil.getDataFromServerPOST(mActivity,new RequestModel(APIConstants.LOGIN_URL, params, new LoginParser()),mLoginDataCallBack);
 
         }
 
@@ -145,19 +193,71 @@ public class _DCN implements IPayManager{
         public void onLoginError(DownjoyError error) {
             int errorCode = error.getMErrorCode();
             String errorMsg = error.getMErrorMessage();
+            Log.d(TAG, "onLoginError:" + errorCode + "|"+ errorMsg);
             if(errorCode==100){
                 mLoginCallBack.backKey(errorMsg);
             }else{
                 mLoginCallBack.loginFaile(errorMsg);
             }
-            Util.alert(mActivity, "onLoginError:" + errorCode + "|"+ errorMsg);
+
         }
 
         @Override
         public void onError(Error error) {
             String errorMessage = error.getMessage();
-            Util.alert(mActivity, "onError:" + errorMessage);
+            Log.d(TAG, "onError:" + errorMessage);
             mLoginCallBack.loginFaile(errorMessage);
+        }
+
+    };
+
+
+    private DataCallback<JSONObject> mLoginDataCallBack = new DataCallback<JSONObject>() {
+
+        @Override
+        public void callbackSuccess(JSONObject paramObject) {
+            closeProgressDialog();
+            Log.d(TAG, "mLoginDataCallBack---------"+paramObject.toString());
+            try {
+                if (paramObject != null && paramObject.optInt("code") == 1) {
+                    JSONObject data = paramObject.optJSONObject("data");
+                    mUid = data.optInt("uid");
+                    mPassport = data.optString("passport");
+                    mSessionid = data.optString("sessionid");
+                    mUserModel=new UserAccount() {
+
+                        @Override
+                        public Integer getUserUid() {
+                            return mUid;
+
+                        }
+
+                        @Override
+                        public String getUserName() {
+                            return mPassport;
+
+                        }
+
+                        @Override
+                        public String getSession() {
+                            return mSessionid;
+
+                        }
+                    };
+                    mLoginCallBack.loginSuccess(mUserModel);
+
+                } else {
+                    mLoginCallBack.loginFaile(paramObject.optString("msg"));
+                }
+            } catch (Exception e) {
+                mLoginCallBack.loginFaile(e.getLocalizedMessage());
+            }
+        }
+
+        @Override
+        public void callbackError(String error) {
+            closeProgressDialog();
+            mLoginCallBack.loginFaile(error);
         }
 
     };
@@ -168,23 +268,133 @@ public class _DCN implements IPayManager{
     }
 
     @Override
-    public void rechargeByQuota(Activity activity, Integer serverId, String serverName, Integer roleId, String roleName, String outOrderid, String pext, Float money, RechargeCallBack rechargeCallBack) {
+    public void rechargeByQuota(Activity activity, final Integer serverId, final String serverName, final Integer roleId, final String roleName, final String outOrderid, final String pext, Float money, RechargeCallBack rechargeCallBack) {
         this.mActivity = activity;
         this.mRechargeCallBack = rechargeCallBack;
+        this.mMoney=money;
+        // 已经是登录状态
+        if (mMoney == 0) {
+            final EditText editText = new EditText(activity);
+            InputFilter[] filters = { new InputFilter.LengthFilter(6) };
+            editText.setFilters( filters );
+            editText.setInputType( InputType.TYPE_CLASS_NUMBER );
+            new AlertDialog.Builder(activity).setTitle("请输入金额")
+            .setIcon(android.R.drawable.ic_dialog_info)
+            .setView(editText)
+            .setNegativeButton("取消", null)
+            .setPositiveButton("确定", new android.content.DialogInterface.OnClickListener() {
+                @Override
+                public void onClick(DialogInterface dialog, int which) {
+                    if(TextUtils.isEmpty(editText.getText().toString())||editText.getText().toString().startsWith("0")){
+                        Toast.makeText(mActivity, "请输入金额", Toast.LENGTH_SHORT).show();
+                        return;
+                    }else{
+                        mMoney=Float.parseFloat(editText.getText().toString());
+                        HashMap<String, Object> params = new HashMap<String, Object>();
+                        Integer gameid = mInitBean.getGameid();
+                        String partner = mInitBean.getPartner();
+                        String referer = mInitBean.getReferer();
+                        long unixTime = DateUtil.getUnixTime();
+                        String deviceno=mInitBean.getDeviceNo();
+                        String signStr =gameid+serverName+deviceno+referer+partner+mUid+mMoney+mPayway+unixTime+mInitBean.getAppKey();
+                        String sign=MD5Util.getMd5toLowerCase(signStr);
 
-        String productName = "测试商品"; // 商品名称
-        String extInfo = "123"; // CP自定义信息，多为CP订单号
+                        params.put("deviceno", deviceno);
+                        params.put("gameid", gameid);
+                        params.put("partner",partner);
+                        params.put("referer", referer);
+                        params.put("time", unixTime);
+                        params.put("sign", sign);
+                        params.put("uid",mUid);
+                        params.put("passport",mPassport);
+                        params.put("serverId",serverId);
+                        params.put("serverName",serverName);
+                        params.put("roleId",roleId);
+                        params.put("roleName",roleName);
+                        params.put("money",mMoney);
+                        params.put("pext",pext);
+                        params.put("money",mMoney);
+                        params.put("payway",mPayway);
+                        params.put("outOrderid",outOrderid);
+                        String hashMapTOgetParams = NetHttpUtil.hashMapTOgetParams(params, APIConstants.PAY_URL);
+                        System.out.println(hashMapTOgetParams);
+                        NetHttpUtil.getDataFromServerPOST(mActivity, new RequestModel(APIConstants.PAY_URL, params,new LoginParser()),mRechargeDataCallBack);
 
-        if (mDownjoyinstance == null) {
-            mDownjoyinstance=Downjoy.getInstance(activity, mMerchantId, mAppId,mServerSeqNum, mAppkey);
+                    }
+                }
+
+            }).show();
+
+        }else{
+            HashMap<String, Object> params = new HashMap<String, Object>();
+            Integer gameid = mInitBean.getGameid();
+            String partner = mInitBean.getPartner();
+            String referer = mInitBean.getReferer();
+            long unixTime = DateUtil.getUnixTime();
+            String deviceno=mInitBean.getDeviceNo();
+            String signStr =gameid+serverName+deviceno+referer+partner+mUid+mMoney+mPayway+unixTime+mInitBean.getAppKey();
+            String sign=MD5Util.getMd5toLowerCase(signStr);
+
+            params.put("deviceno", deviceno);
+            params.put("gameid", gameid);
+            params.put("partner",partner);
+            params.put("referer", referer);
+            params.put("time", unixTime);
+            params.put("sign", sign);
+            params.put("uid",mUid);
+            params.put("passport",mPassport);
+            params.put("serverId",serverId);
+            params.put("serverName",serverName);
+            params.put("roleId",roleId);
+            params.put("roleName",roleName);
+            params.put("money",mMoney);
+            params.put("pext",pext);
+            params.put("money",money);
+            params.put("payway",mPayway);
+            params.put("outOrderid",outOrderid);
+            String hashMapTOgetParams = NetHttpUtil.hashMapTOgetParams(params, APIConstants.PAY_URL);
+            System.out.println(hashMapTOgetParams);
+            NetHttpUtil.getDataFromServerPOST(activity, new RequestModel(APIConstants.PAY_URL, params,new LoginParser()),mRechargeDataCallBack);
+
         }
-        mDownjoyinstance.openPaymentDialog(activity,money, productName, extInfo, mRechargeCallbackListener);
+
 
     }
+
+    private DataCallback<JSONObject> mRechargeDataCallBack = new DataCallback<JSONObject>() {
+
+        @Override
+        public void callbackSuccess(JSONObject paramObject) {
+            Log.d(TAG, "mRechargeDataCallBack---------"+paramObject.toString());
+
+            if (paramObject != null && (paramObject.optInt("code") == 1||paramObject.optInt("code") == 24)) {
+                JSONObject data = paramObject.optJSONObject("data");
+                String orderid=data.optString("orderid");
+                if (mDownjoyinstance == null) {
+                    mDownjoyinstance=Downjoy.getInstance(mActivity, mMerchantId, mAppId,mServerSeqNum, mAppkey);
+                }
+                mDownjoyinstance.openPaymentDialog(mActivity,mMoney, "游戏道具", orderid, mRechargeCallbackListener);
+
+            }else {
+                Log.d(TAG, paramObject.optString("msg"));
+                mRechargeCallBack.rechargeFaile(paramObject.optString("msg"));
+            }
+
+        }
+
+        @Override
+        public void callbackError(String error) {
+            Log.d(TAG, error);
+            mRechargeCallBack.rechargeFaile(error);
+
+        }
+
+    };
 
 
     com.downjoy.CallbackListener mRechargeCallbackListener=new com.downjoy.CallbackListener(){
 
+        private static final long serialVersionUID = 1L;
 
         @Override
         public void onPaymentSuccess(String orderNo) {
@@ -193,8 +403,7 @@ public class _DCN implements IPayManager{
         }
 
         @Override
-        public void onPaymentError(DownjoyError error,
-                        String orderNo) {
+        public void onPaymentError(DownjoyError error,String orderNo) {
             int errorCode = error.getMErrorCode();
             String errorMsg = error.getMErrorMessage();
             if(errorCode==103){
@@ -204,14 +413,13 @@ public class _DCN implements IPayManager{
                 mRechargeCallBack.rechargeFaile(errorMsg);
 
             }
-            Util.alert(mActivity, "onPaymentError:"
-                            + errorCode + "|" + errorMsg
-                            + "\n orderNo:" + orderNo);
+            Log.d(TAG, "onPaymentError:"+ errorCode + "|" + errorMsg+ "\n orderNo:" + orderNo);
         }
 
         @Override
         public void onError(Error error) {
-            Util.alert(mActivity,"onError:" + error.getMessage());
+            Log.d(TAG, "onError:" + error.getMessage());
+            mRechargeCallBack.rechargeFaile(error.getMessage());
         }
     };
 
@@ -235,12 +443,10 @@ public class _DCN implements IPayManager{
 
 
     com.downjoy.CallbackListener mLogoutCallbackListener1=new com.downjoy.CallbackListener(){
-
-
+        private static final long serialVersionUID = 1L;
 
         @Override
         public void onLogoutSuccess() {
-            Util.alert(mActivity, "logout ok");
             mLogoutCallBack.logoutCallBack();
         }
 
@@ -248,12 +454,14 @@ public class _DCN implements IPayManager{
         public void onLogoutError(DownjoyError error) {
             int errorCode = error.getMErrorCode();
             String errorMsg = error.getMErrorMessage();
-            Util.alert(mActivity, "onLogoutError:" + errorCode + "|" + errorMsg);
+            mLogoutCallBack.logoutCallBack();
+            Log.d(TAG, "onLogoutError:" + errorCode + "|" + errorMsg);
         }
 
         @Override
         public void onError(Error error) {
-            Util.alert(mActivity, "onError:" + error.getMessage());
+            Log.d(TAG, "onError:" + error.getMessage());
+            mLogoutCallBack.logoutCallBack();
         }
 
 
@@ -273,17 +481,17 @@ public class _DCN implements IPayManager{
     }
     com.downjoy.CallbackListener mLogoutCallbackListener=new com.downjoy.CallbackListener(){
 
+        private static final long serialVersionUID = 1L;
 
         @Override
         public void onSwitchAccountAndRestart() {
-           mLogoutCallBack.logoutCallBack();
+            mLogoutCallBack.logoutCallBack();
 
         }
 
         @Override
         public void onError(Error error) {
-            String errorMessage = error.getMessage();
-            Util.alert(mActivity, "onError:" + errorMessage);
+            Log.d(TAG, "onError:" + error.getMessage());
         }
 
 
@@ -337,10 +545,10 @@ public class _DCN implements IPayManager{
 
     @Override
     public void onPause(Activity activity) {
-//        if (mDownjoyinstance == null) {
-//            mDownjoyinstance=Downjoy.getInstance(activity, mMerchantId, mAppId,mServerSeqNum, mAppkey);
-//        }
-//        mDownjoyinstance.pause();
+        //        if (mDownjoyinstance == null) {
+        //            mDownjoyinstance=Downjoy.getInstance(activity, mMerchantId, mAppId,mServerSeqNum, mAppkey);
+        //        }
+        //        mDownjoyinstance.pause();
 
 
     }
@@ -357,5 +565,44 @@ public class _DCN implements IPayManager{
         mDownjoyinstance.destroy();
 
     }
+
+    /**
+     * @return void 返回类型
+     * @Title: showProgressDialog(设置进度条)
+     * @author xiaoming.yuan
+     * @data 2013-7-12 下午10:09:36
+     */
+    protected void showProgressDialog(Activity activity) {
+        if (! activity.isFinishing()) {
+            try {
+                this.mProgressDialog = new ProgressDialog(activity);// 实例化
+                // 设置ProgressDialog 的进度条style
+                this.mProgressDialog.setProgressStyle(ProgressDialog.STYLE_SPINNER);// 设置进度条风格，风格为圆形，旋转的
+                this.mProgressDialog.setTitle("登陆");
+                this.mProgressDialog.setMessage("加载中...");// 设置ProgressDialog 提示信息
+                // 设置ProgressDialog 的进度条是否不明确
+                this.mProgressDialog.setIndeterminate(false);
+                // 设置ProgressDialog 的进度条是否不明确
+                this.mProgressDialog.setCancelable(false);
+                this.mProgressDialog.setCanceledOnTouchOutside(false);
+                this.mProgressDialog.show();
+            } catch (Exception e) {
+                e.printStackTrace();
+            }
+
+        }
+    }
+
+    /**
+     * @return void 返回类型
+     * @Title: closeProgressDialog(关闭进度条)
+     * @author xiaoming.yuan
+     * @data 2013-7-12 下午10:09:30
+     */
+    protected void closeProgressDialog() {
+        if (this.mProgressDialog != null && this.mProgressDialog.isShowing())
+            this.mProgressDialog.dismiss();
+    }
+
 }
 
