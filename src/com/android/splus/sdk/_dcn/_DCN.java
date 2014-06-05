@@ -399,7 +399,7 @@ public class _DCN implements IPayManager{
         @Override
         public void onPaymentSuccess(String orderNo) {
             Util.alert(mActivity,"payment success! \n orderNo:"+ orderNo);
-            mRechargeCallBack.rechargeSuccess(null);
+            mRechargeCallBack.rechargeSuccess(mUserModel);
         }
 
         @Override
